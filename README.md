@@ -13,7 +13,7 @@ ability to create, delete, write, append, read and modify.
 
 The filesystem is designed for SD cards, but I believe could have reasonable
 performance for other media (i.e. floppy, spinning disk, etc) since the write
-peformance would never require seeking. However, because it's designed for SD
+performance would never require seeking. However, because it's designed for SD
 cards, it performs wear-leveling, only erasing each byte once before cycling
 back to the beginning. It follows the block erasure principles required by SD
 Cards, read about them
@@ -41,7 +41,7 @@ For reference, that wikipedia article also states the [typical block
 sizes](https://en.wikipedia.org/wiki/Flash_memory#NAND_memories). The smallest
 is 16KiB, the largest is 512KiB.
 
-To take this into account, the following priciples are followed:
+To take this into account, the following principles are followed:
 - Every data structure starts with some flags/bits "reserved" and set to `1`
   ("erased"). They may later be set to 0 by the Garbage Collector (GC),
   indicating that data has moved/etc. More on the GC later.
@@ -60,7 +60,7 @@ To take this into account, the following priciples are followed:
   reference pointers) of the parents of any moved data.
   - For example: if you have a binary search tree, and your left node has moved.
     You will have a flag indicating this fact, and you will have a "new"
-    reference set asside for the new data.
+    reference set aside for the new data.
 
 ## Limitations
 
@@ -70,11 +70,11 @@ To take this into account, the following priciples are followed:
   - Alternative: simply partition the SD Card and put large long-lived files in
     the new partition and symlink them from your filesystem. A different
     filesystem designed only for large files (which can take up whole "erasure
-    blocks") could easily be created to accomodate this need.
+    blocks") could easily be created to accommodate this need.
 - Not necessarily good for frequently mutating files, especially large files.
   Each mutation requires the entire file to be re-written to the write head.
 - Large numbers of renamings can slow down file and directory lookup in the
-  directories where renamings have happened. The OS may ocaisionally need to
+  directories where renamings have happened. The OS may occasionally need to
   "cleanup" the directory structure if this happens.
 
 Some of these issues could be solved in the future. For example, the GC could
@@ -108,8 +108,8 @@ struct Sector {
 }
 ```
 
-The sector contains a flag `notRoot` specifying whehther this sector contains
-the reference to the "root" node (i.e. `/` in a linux filesystem). At filesystem
+The sector contains a flag `notRoot` specifying whether this sector contains
+the reference to the "root" node (i.e. `/` in a Linux filesystem). At filesystem
 startup, a binary search (time `O(log n)`)is performed over all sectors to find
 this sector. The binary search uses the `cycleCount`, which increments every
 time the GC collects a sector. This also finds the current GC location, since it is a known number of
@@ -117,7 +117,7 @@ time the GC collects a sector. This also finds the current GC location, since it
 keep track of where the root node is stored.
 
 All GCRef's contain a "second" reference to use when the first is Garbage
-collectoed. A node will only be updated once, as the GC will wrap around to
+collected. A node will only be updated once, as the GC will wrap around to
 clean it up (setting to the `first` reference) before it needs to be updated
 again.
 
@@ -177,7 +177,7 @@ etc are contained in the `Node` struct.
 If a directory node needs to be renamed, it simply has `del` set and a new node
 is created. The BST search algorithm will use it for finding nodes, but will
 normally not return it. When the node is GC'd it will be removed. The OS can
-also choose to rewrite the whole directory structure to permanantly delete it
+also choose to rewrite the whole directory structure to permanently delete it
 and all other nodes, which may sometimes be required if a directory contain too
 many deleted nodes, especially deleted nodes with the same name.
 
@@ -218,8 +218,8 @@ This means that if there is power-loss while the parent is being updated, the
 startup procedure can detect this (by looking at the last `initialized` node
 being written and it's parent) and correct the problem.
 
-Appending to `Data` is simply updating the `next` field.  Similarily, (although
-probablly rarely) renaming a file/dir by adding to the name operates in the same
+Appending to `Data` is simply updating the `next` field.  Similarly, (although
+probably rarely) renaming a file/dir by adding to the name operates in the same
 way.
 
 Mutating data (non appended) requires rewriting the whole file and updating the
@@ -252,7 +252,7 @@ Basic operation:
   the sector. The WH does not need to check types or do any other special
   operation. It simply updates it's `freeBitmap` as data is written.
   - Startup will check for non-agreement. If the final slot is marked as "free"
-    but is not set to all `1`'s, then it will asume power loss and mark it as
+    but is not set to all `1`'s, then it will assume power loss and mark it as
     non-free.
   - Note: No references to data are set before that data has been written.
 
@@ -270,7 +270,7 @@ detail how this will be solved for.
 
 Possible Solutions:
 
-1. CRC checksums for all non-mutable data (i.e. the `Data` struct), which can
+1. CRC checksum for all non-mutable data (i.e. the `Data` struct), which can
    both find issues and fix them.
 2. Double or even triple duplicated data for mutable data (i.e. flags, refs,
    etc).
@@ -290,7 +290,7 @@ Therefore this body of work is licensed using the [UNLICENSE](./UNLICENSE),
 unless otherwise specified at the beginning of the source file.
 
 If for any reason the UNLICENSE is not valid in your jurisdiction or project,
-this work can be singly or dual licensed at your discression with the MIT
+this work can be singly or dual licensed at your discretion with the MIT
 license below.
 
 ```text
