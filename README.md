@@ -262,7 +262,7 @@ WH, moving non-deleted data to the write head and erasing blocks. After all data
 in a sector has been moved, it clears the `finalGCRunning` flag.
 
 The GC knows how to determine the size of a node. It simply scans the sector for
-living nodes, knowing whether they are by using their lengths.
+living nodes, knowing where they are by using their lengths.
 
 ## Data Corruption
 TODO: Data corruption is a real problem for storage systems. This section should
