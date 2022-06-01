@@ -280,6 +280,41 @@ Possible Solutions:
 3. Bad-block bitmaps
 4. Other solutions?
 
+## Physical Write Layer API
+On most SDCards (i.e. non "Standard Capacity" cards) both reads and writes can
+only be to a fixed 512 byte "block", which I'll call a block512 (see [Physical
+Layer Spec] section 7.2). Also, from 7.1, SDUC cards are simply not supported in
+SPI mode.
+
+To accomodate this, but still allow byte-level control from an API standpoint,
+the write interface will use a 512 byte buffer. To write to a byte at ref:
+
+```
+Block512 bl512 = asBlock512(ref);
+readBlock512(&buf, bl512); // read 512 bytes of data
+U2 offset = asOffset512(ref);
+buf[offset] &= 0xCF;  // clear some bits (note that only clear is allowed)
+writeBlock512(&buf, bl512); // write 512 bytes of data.
+```
+
+Most loops/etc will work as if against a normal buffer but only actually write
+data when the bl512 changes, then will call readBlock512 again.
+
+From the [Physical Layer Spec] 7.2: For "Standard Capacity" memory cards (I
+think ~2 GB) a data block can be the entire card or as small as a single byte.
+However, for SDHC and SDXC cards, **block length is fixed to 512 bytes** for
+all read+write operations.  (from 7.1) SDUC cards are _not supported_.
+- I'm not sure if this _should_ affect anything actually. 512 bytes is very
+  large for the data structures I'm using. I can still read/write in 64byte
+  chunks by just discarding any data I don't want or sending all 1's for
+  pieces I don't care about (or the exact data... testing needed. I think
+  start with exact data).
+- Any "data chunks" I support definitely need to be able to be at least 512
+  bytes long though.
+
+
+[Physical Layer Spec]: https://www.sdcard.org/downloads/pls/
+
 ## LICENSING
 
 This work is part of the Civboot project and therefore primarily exists for
