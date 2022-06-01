@@ -300,18 +300,24 @@ writeBlock512(&buf, bl512); // write 512 bytes of data.
 Most loops/etc will work as if against a normal buffer but only actually write
 data when the bl512 changes, then will call readBlock512 again.
 
-From the [Physical Layer Spec] 7.2: For "Standard Capacity" memory cards (I
-think ~2 GB) a data block can be the entire card or as small as a single byte.
-However, for SDHC and SDXC cards, **block length is fixed to 512 bytes** for
-all read+write operations.  (from 7.1) SDUC cards are _not supported_.
-- I'm not sure if this _should_ affect anything actually. 512 bytes is very
-  large for the data structures I'm using. I can still read/write in 64byte
-  chunks by just discarding any data I don't want or sending all 1's for
-  pieces I don't care about (or the exact data... testing needed. I think
-  start with exact data).
-- Any "data chunks" I support definitely need to be able to be at least 512
-  bytes long though.
+For "erasing" data (setting to 1) you send `CMD32` then `CMD33` to set the
+start/end address of the erasure. These will use `Block512` indexes. You then
+send `CMD38:ERASE`.
 
+
+### Value after Erasure.
+From `4.3.5.1`:
+
+> The data at the card after an erase operation is either '0' or '1', depends on
+> the card vendor. The SCR register bit `DATA_STAT_AFTER_ERASE` (bit 55) defines
+> this.
+
+This is _very_ interesting. I may treat the card (from the API) as you can only
+"set" bits, never "clear" them -- since that is more intuitive I think.
+
+The flags would change `alive -> del`, `uninitialized -> initialized`, etc. Flag
+maps would change from `freemaps` to `allocmaps`, etc. The API would auto-invert
+as-needed for the hardware connected. I like this change!
 
 [Physical Layer Spec]: https://www.sdcard.org/downloads/pls/
 
