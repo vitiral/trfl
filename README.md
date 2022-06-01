@@ -73,7 +73,7 @@ ability to create, delete, write, append, read and modify.
 
 ```
 
-The filesystem is designed for SD cards, but I believe could have reasonable
+The filesystem is designed for SD cards, but I believe it could have reasonable
 performance for other media (i.e. floppy, spinning disk, etc) since the write
 performance would never require seeking. However, because it's designed for SD
 cards, it performs wear-leveling, only erasing each byte once before cycling
@@ -166,13 +166,17 @@ is what `VersionedRef` is used for.
 
 ### Versioned Data
 
-The VersionedRef is simply an array of `versions`, along with an array of the
-current (and possibly future) versions. Recall, we can only set bits, never
-clear them! We have to reserve space for future changes ahead of time. When the
-`len` of versions has been exhausted, the "newest" version will be at `next`,
-which will have double the current len. This means that the time to find a
-version is the same as performing a binary search (`O(log v)` where v is the
-number of versions).
+The VersionedRef is simply an array of the past and (possibly future and
+current) version of some data. If `next` is set, then look there for the current
+version.  Otherwise, the last initialized version in `versions` the current one.
+
+Why do we do this? Recall, we can only set bits, never clear them... unless we
+clear a whole sector, which is what the GC does. We have to reserve space for
+future changes ahead of time.
+
+When `versions` are exhausted, a new set of versions with twice the length are
+reserved at `next`. Therefore the time to find a version is the same as
+performing a binary search: `O(log v)` where v is the number of versions.
 
 ```
 struct VersionedRef[A] {
@@ -184,20 +188,22 @@ struct VersionedRef[A] {
 \ A compressed version of VersionedRef with known size, used in other structs.
 struct VersionedRefStart[A] {
   start: GCRef[A]
-  next: GCRef[VersionedRef[A]],  \ if set, then use instead of cur
+  next: GCRef[VersionedRef[A]],  \ if set, then use instead of start
 }
 ```
 
 ### Ropes for Byte Data
 Finally, we have data storage in the RawData and Rope structs. These are
-referenced by `VersionedRef*`'s above, which are themselves used in the `File`
+referenced by `VersionedRef`'s above, which are themselves used in the `File`
 object seen later.
 
 > **Why Ropes?**: Ropes enable both fast appends _and_ fast and efficient
-> mutation of data.
+> mutation of data. Along with binary search trees they are pretty much the
+> rockstars of filesystems.
 
 ```
 struct RawData {
+  flag: U1, \ del | initialized | type=RawData
   parent: GCRef,
   crc32: U4, \ CRC32 checksum on len + data
   len: U2,
@@ -206,12 +212,15 @@ struct RawData {
 
 \ Versioned rope length
 struct RopeLen {
+  flag: U1, \ del | initialized | type=RopeLen
+  parent: GCRef[RopeLen],
   next: GCRef[RopeLen], \ if set, use instead of this
   len: U2, \ number of versions
   lengthVersions: Arr[U2, len], \ length values at versions
 }
 
 struct Rope {
+  flag: U1, \ del | initialized | type=Rope
   parent: GCRef[Node], \ Filesystem Node
   up:    VersionedRefStart[Rope | RawData | SectorData],
   left:  VersionedRefStart[Rope | RawData | SectorData],
@@ -224,7 +233,7 @@ To see how ropes work, let's look at an example. `R[len]` represents a rope node
 and `"some string"` represents RawData.
 
 ```
-  We start writing some data, which goes on the left of the rope.
+  We start writing some data, which goes on the left of the Rope:
 
    /----------------R[12]
    |
@@ -271,15 +280,16 @@ and `"some string"` represents RawData.
 
 A few notes on ropes:
 - For a balanced rope, the time for most operations (seek, insert, etc) is `O(log v + log n)`.
-  Streaming operations like streaming read/write is `O(1)` since it involves
-  just traversing/building the tree from a known location.
+  Streaming operations like streaming read/write is `O(1)` after the initial
+  seek since it involves just traversing/building the tree from a known
+  location.
 - We can choose to re-balance the rope at any time, which will also reduce the
   number of versions. We simply combine the RawData's and create a new rope,
   then update the version of the parent node.
 - Ropes can start out using small RawData chunks (say maximum ~500 bytes), then
-  the GC can "graduate" them to larger chunks (and more compact storage) if they
-  were not mutated during the cycle. The GC can tell they were not mutated by
-  reading their version structs.
+  the GC can "graduate" them to larger chunks or even SectorData if they were
+  not mutated during the cycle. The GC can tell they were not mutated by reading
+  their version structs.
 
 ## Sector
 The size of a sector is the size of an [Erasure Block]. It contains some
@@ -287,10 +297,11 @@ metadata at the beginning of every erasure block:
 
 ```
 struct Sector {
-  \ <unused> | initialized | notRoot | firstGCDone | finalGCDone | type=sector
+  \ del | initialized | notRoot | firstGCDone | finalGCDone | type=Sector
   flags: U1,
   cycle: U4,  \ 4 byte cycle count
   root: GCRef,
+  allocBitmap: Arr[U1, sectorLen / 8],
 }
 ```
 
@@ -302,12 +313,16 @@ time the GC collects a sector. This also finds the current GC location, since it
 is a known number of "erasure blocks" in front of the root sector. After this,
 the filesystem will keep track of where the root node is stored.
 
+The allocBitmap has each bit set as the relevant 64 byte slot is used. This
+keeps track of the currently allocated data for the event of power loss. This is
+checked against any data which is written to determine if there was critical
+power loss (corruption) and help in recovery.
 
 ### SectorData for large Blocks of Data
 
 If the RawData would be nearly the size of a single sector/[Erasure Block], it
 can be the type SectorData. This _replaces_ the normal sector metadata and has
-type=`SectorData`.
+type=SectorData.
 
 ```
 struct SectorData {
@@ -318,19 +333,19 @@ struct SectorData {
 }
 ```
 
-When the GC encounters unmovable data which has not been deleted, it doesn't
-move it. This drastically reduces churn on the GC for large files.
+When the GC encounters SectorData which has not been deleted, it doesn't move
+it. This drastically reduces churn on the GC for large files.
 
-Since the data is not moved the GC does not need to update the parent
-reference; therefore no parent reference is stored. Similarly, when the
-SectorData's parent is moved, it doesn't need to update that fact since there is
-no reference to update. This allows the sector data to essentially be "frozen"
-and reduces the number of erasures on blocks where sector data is stored.
+Since the data is not moved the GC does not need to update the parent reference;
+therefore no parent reference is stored. Similarly, when the SectorData's parent
+is moved, it doesn't need to update that fact since there is no reference to
+update. This allows the sector data to essentially be "frozen" and reduces the
+number of erasures on blocks where sector data is stored.
 
 ### Node Struct
 
 The filesystem is composed of a binary search tree of "nodes" which have names
-and associated data, which is a versioned reference to either a new tree or raw
+and associated data, which is a versioned reference to either a new node-tree or
 data.
 
 ```
@@ -357,32 +372,33 @@ struct Node {
 #### Deletion, Re-naming and Cleanup
 A node is considered deleted if all of its used versions have the `del` flag
 set. If the node-name is ever re-used, then the new data will be added to the
-VersionedRef.  Note that a node's parent and left/right nodes _cannot_ be
+VersionedRef. Note that a node's parent and left/right nodes _cannot_ be
 updated by anyone except the GC, so even though the node is "deleted" it is
 still used for the BST search until the GC collects it.
 
 Renaming can be accomplished with a deletion then an add. Any data held by the
-node must be re-written (unless that data is SectorData)  since there is no way
+node must be re-written (unless that data is SectorData) since there is no way
 to update the `Parent` reference.
 
 The OS or user may also occasionally decide to rewrite a directory structure in
 order to cleanup any large VersionedRef's or re-balance binary search trees,
 however note that this is an extremely expensive operation requiring rewriting
-almost all files in a directory -- so only useful in specific cases where there
-are an extremely large number of nodes in a directory.
+almost all files (and sub-files) in a directory -- so this is only useful in
+specific cases where there are an extremely large number of nodes in a
+directory.
 
 ## Write Head (WH)
-Both the GC and data writing are designed to be **byte atomic**, meaning that
-power can be lost at any time and when the system reboots it will still be
-able to recover the filesystem (although some space may be lost on that cycle).
+Both the GC and data writing are designed to be byte atomic, meaning that power
+can be lost at any time and when the system reboots it will still be able to
+recover the filesystem (although some space may be lost on that cycle).
 
 Data is written, filling up one sector at a time. The sector starts off as
 "cleared" (all bits set to 0), and therefore has flags `initialized=false,
-notRoot=false, firstGCDone=false`. Likewise, the sector's `allocBitmap` is all set to
-0, indicating all 64 byte slots are "free".
+notRoot=false, firstGCDone=false`. Likewise, the sector's `allocBitmap` is all
+set to 0, indicating all 64 byte slots are "free".
 
 Basic operation:
-- Before the sector is reserved, the GC has cleared `firstGCDone=0`
+- Before the sector is reserved, the GC has set `firstGCDone=0`
 - The sector is "reserved" by updating the current cycle, setting the current
   root and marking the slots used by the sector as allocated. `inintialized` is
   then set to `1`, leaving `notRoot=0` (this sector is now root). The previous
@@ -403,7 +419,7 @@ non-deleted data to the write head and erasing blocks. After all data in a
 sector has been moved, it clears the `finalGCRunning` flag.
 
 The GC knows how to determine the size of a node. It simply scans the sector for
-non-deleted nodes, knowing where they are by using their lengths.
+non-deleted nodes, knowing where they are by using their lengths/etc.
 
 ## Data Corruption
 TODO: Data corruption is a real problem for storage systems. This section should
@@ -431,17 +447,20 @@ the write interface will use a 512 byte buffer. To write to a byte at ref:
 Block512 bl512 = asBlock512(ref);
 readBlock512(&buf, bl512); // read 512 bytes of data
 U2 offset = asOffset512(ref);
-buf[offset] &= 0xCF;  // clear some bits (note that only clear is allowed)
+buf[offset] |= 0x84;  // set some bits (note that only set is allowed)
 writeBlock512(&buf, bl512); // write 512 bytes of data.
 ```
 
 Most loops/etc will work as if against a normal buffer but only actually write
 data when the bl512 changes, then will call readBlock512 again.
 
-For "erasing" data (setting to 1) you send `CMD32` then `CMD33` to set the
+For "erasing" data (setting to 0) you send `CMD32` then `CMD33` to set the
 start/end address of the erasure. These will use `Block512` indexes. You then
 send `CMD38:ERASE`.
 
+Note in actual fact that erasure may set bits to 1. For those devices, all
+communication will be inverted before sent. However, from the client's
+perspective all operations will be "normal."
 
 ## Bibliography
 
