@@ -289,7 +289,7 @@ metadata at the beginning of every erasure block:
 
 ```
 struct Sector {
-  \ del | initialized | notRoot | firstGCDone | finalGCDone | type=Sector
+  \ del | initialized | gcDone | type=Sector
   flags: U1,
   cycle: U4,  \ 4 byte cycle count
   root: GCRef,
@@ -297,13 +297,14 @@ struct Sector {
 }
 ```
 
-The sector contains a flag `notRoot` specifying whether this sector contains the
-reference to the "root" node (i.e. `/` in a Linux filesystem). At filesystem
-startup, a binary search (time `O(log n)`) is performed over all sectors to find
-this sector. The binary search uses the `cycle` count, which increments every
-time the GC collects a sector. This also finds the current GC location, since it
-is a known number of "erasure blocks" in front of the root sector. After this,
-the filesystem will keep track of where the root node is stored.
+The sector contains the flags `del` and `initialized`. If the sector is not
+`del` and it is `initialized` then this sector contains the reference to the
+"root" node (i.e. `/` in a Linux filesystem). At filesystem startup, a binary
+search (time `O(log n)`) is performed over all sectors to find this sector. The
+binary search uses the `cycle` count, which increments every time the GC
+collects a sector. This also finds the current GC location, since it is a known
+number of "erasure blocks" in front of the root sector. After this, the
+filesystem will keep track of where the root node is stored.
 
 The allocBitmap has each bit set as the relevant 64 byte slot is used. This
 keeps track of the currently allocated data for the event of power loss. This is
@@ -386,25 +387,23 @@ can be lost at any time and when the system reboots it will still be able to
 recover the filesystem (although some space may be lost on that cycle).
 
 Data is written, filling up one sector at a time. The sector starts off as
-"cleared" (all bits set to 0), and therefore has flags `initialized=false,
-notRoot=false, firstGCDone=false`. Likewise, the sector's `allocBitmap` is all
+"cleared" (all bits set to 0), and therefore has flags `del=0, initialized=0,
+firstGCDone=0`. Likewise, the sector's `allocBitmap` is all
 set to 0, indicating all 64 byte slots are "free".
 
 Basic operation:
-- Before the sector is reserved, the GC has set `firstGCDone=0`
+- Before the sector is reserved, the GC has set `gcDone=1`, saying the sector
+  has been GC'd.
 - The sector is "reserved" by updating the current cycle, setting the current
   root and marking the slots used by the sector as allocated. `inintialized` is
-  then set to `1`, leaving `notRoot=0` (this sector is now root). The previous
-  sector's `notRoot` is then set to 1.
-  - Startup will check for the previous non-atomicity before selecting the root
-    sector. In general, any non-atomicity is designed to be deterministic and
-    therefore possible to check for.
+  then set to `1`, leaving `del=0` (this sector is now root). The previous
+  sector's `del` is then set to 1.
 - The WH then receives data to write equal to or less than the remaining size of
   the sector. The WH does not need to check types or do any other special
-  operation. It simply updates it's `freeBitmap` as data is written.
+  operation. It simply updates it's `allocBitmap` as data is written.
   - Startup will check for non-agreement. If the final slot is marked as "free"
     but is not set to all `0`'s, then it will assume power loss and mark it as
-    non-free.
+    non-free as well as attempt other recovery.
 
 ## The Garbage Collector (GC)
 The GC runs more than 1 (probably 2 or more) sectors in front of the WH, moving
@@ -422,7 +421,7 @@ Possible Solutions:
 
 1. CRC checksum for all non-mutable data (i.e. the `Data` structs), which can
    both find issues and fix them.
-2. Double or even triple duplicated data for mutable data (i.e. flags, refs,
+2. Double or even triple duplicate data for mutable data (i.e. flags, refs,
    etc).
 3. Bad-block bitmaps
 4. Other solutions?
@@ -444,8 +443,8 @@ buf[offset] |= 0x84;  // set some bits (note that only set is allowed)
 writeBlock512(&buf, bl512); // write 512 bytes of data.
 ```
 
-Most loops/etc will work as if against a normal buffer but only actually write
-data when the bl512 changes, then will call readBlock512 again.
+Most loops/etc will work as if against a normal buffer, then flush the buffer
+when the bl512 changes.
 
 For "erasing" data (setting to 0) you send `CMD32` then `CMD33` to set the
 start/end address of the erasure. These will use `Block512` indexes. You then
