@@ -351,6 +351,7 @@ struct Owner {
 }
 
 struct Node {
+  flag: U1, \ del | initialized | type=Node
   created: TimeMilliseconds,
   owner: Owner,
   name: GCRef[RawData]
