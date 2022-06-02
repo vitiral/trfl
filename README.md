@@ -9,6 +9,10 @@ This is an extremely simple embedded filesystem with low memory requirements. It
 stores a Binary Search Tree of directories, files and their data with the
 ability to create, delete, write, append, read and modify.
 
+The filesystem is designed to wear-level for solid state drives (SD Cards, SSD
+drives, etc) but can also be used for [Other Media](#other-media) with only
+minor changes.
+
 ## Basics
 
 **Stages of the Write Head (WH) and the Garbage Collector (GC) Head**
@@ -26,8 +30,9 @@ ability to create, delete, write, append, read and modify.
      |                                                               |
      |---------------------------------------------------------------|
 
-   Filesystem start, some data used (`U`), some deleted (`.`) Write Head (WH)
-   writes data from `left->right`, as received by the operating system (user).
+   Filesystem starts being written, some data is used (`U`), some deleted (`.`)
+   Write Head (WH) writes data from `left->right`, as received by the operating
+   system (user).
 
              WH
      |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |
@@ -41,11 +46,12 @@ ability to create, delete, write, append, read and modify.
 
    Write Head (WH) nears end of SD Card and Garbage Collector (GC) Head starts.
    Note that much of initial data is now deleted (`.`) due to normal filesystem
-   operation (moving files, changing contents, etc). GC begins also sending
-   still used (U) data to the WH, which writes it alongside the new data from
-   the OS (user). Whenever the GC moves data, it updates the parent references.
-   Once all used data has been moved and references updated, the block can be
-   freed (` `).
+   operation (moving files, changing contents, etc).
+
+   GC sends still used (U) data to the WH, which writes it alongside the new
+   data from the OS (user). Whenever the GC moves data, it updates the parent
+   references. Once all used data has been moved and references updated, the
+   block can be freed (` `).
 
      GC -----------------------------------------------> WH
      |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |
@@ -57,9 +63,10 @@ ability to create, delete, write, append, read and modify.
      |U...U.UUUU...UUUU...UUUUUUUUUU...UUUUUU..UUUUUU.UU             |
      |---------------------------------------------------------------|
 
-   GC has erased data and WH has wrapped around. GC continues to send used data
-   to the WH and erase blocks. There is no memory fragmentation because any
-   still used data is continuously re-packed by the write head on each cycle.
+   GC has erased data and WH has wrapped around. The cycle count increases. GC
+   continues to send used data to the WH and erase blocks. There is no memory
+   fragmentation because any still used data is continuously re-packed by the
+   write head on each cycle.
 
          WH <------- GC
      |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |
@@ -71,42 +78,27 @@ ability to create, delete, write, append, read and modify.
      |U.u            U....UU..UUUUUU...UU.U.U.........UU.U.UU...UU.UU|
      |---------------------------------------------------------------|
 
+   The system can continue cycling in this way until the drive is too full for
+   the GC to operate efficiently (unknown limit, probably 80-90% full?)
 ```
 
-The filesystem is designed for SD cards, but I believe it could have reasonable
-performance for other media (i.e. floppy, spinning disk, etc) since the write
-performance would never require seeking. However, because it's designed for SD
-cards, it performs wear-leveling, only erasing each byte once before cycling
-back to the beginning. It follows the block erasure principles required by SD
-Cards, read about them
-[on Wikipedia](https://en.wikipedia.org/wiki/Flash_memory#Block_erasure)
+The system is inherently "wear leveling" since it only erases sectors once per
+cycle. The design of the system follows the block erasure principles required by
+Flash Memory, read about them
+[on Wikipedia](https://en.wikipedia.org/wiki/Flash_memory#Block_erasure). In
+summary:
 
-> One limitation of flash memory is that, although it can be read or programmed
-> a byte or a word at a time in a random access fashion, **it can be erased only
-> a block at a time**. This generally sets all bits in the block to 1. Starting
-> with a freshly erased block, any location within that block can be programmed.
-> However, once a bit has been set to 0, only by erasing the entire block can it
-> be changed back to 1. In other words, flash memory (specifically NOR flash)
-> offers random-access read and programming operations but does not offer
-> arbitrary random-access rewrite or erase operations. A location can, however,
-> be rewritten as long as the new value's 0 bits are a superset of the
-> over-written values. For example, a nibble value may be erased to 1111, then
-> written as 1110. Successive writes to that nibble can change it to 1010, then
-> 0010, and finally 0000. Essentially, erasure sets all bits to 1, and
-> programming can only clear bits to 0. [79] Some file systems designed for flash
-> devices make use of this rewrite capability, for example Yaffs1, to represent
-> sector metadata. Other flash file systems, such as YAFFS2, never make use of
-> this "rewrite" capability—they do a lot of extra work to meet a "write once
-> rule".
+- You can set a single bit of data at any time
+- You can only erase data in the size of an [Erasure Block] (between 16KiB and
+  512KiB). Erasing causes wear on the device and most solid state devices can
+  only handle a certain number of erasures (ten thousand to a few million
+  typically). This is why wear-leveling (erasing blocks evenly) is so important.
 
-For reference, that wikipedia article also states the typical [Erasure Block]
-sizes are between 16KiB and 512KiB.
-
-> Quick note: In actual fact, the hardware may be implemented so that "erasure"
-> sets the bits to `0` and bits can only be set to `1`. Since this is easier
-> conceptually, it will be the mental model used and the physical layer will
-> invert the data as needed. For more info see section 4.3.5.1 of the [Physical
-> Layer Spec].
+> **Note**: the actual value of bits on erasure is determined by the vendor.
+> However, we use "erased" to mean `0`, and can therefore set any bit at any
+> time. The physical layer implementation will invert the data on transport
+> as needed by the specific device.  See 4.3.5.1 of [Physical Layer Spec]
+> for more details.
 
 To take this into account, the following principles are followed:
 - Every data structure starts with some flags/bits "reserved" and set to `0`
@@ -342,7 +334,7 @@ is moved, it doesn't need to update that fact since there is no reference to
 update. This allows the sector data to essentially be "frozen" and reduces the
 number of erasures on blocks where sector data is stored.
 
-### Node Struct
+## Node Struct
 
 The filesystem is composed of a binary search tree of "nodes" which have names
 and associated data, which is a versioned reference to either a new node-tree or
@@ -461,6 +453,32 @@ send `CMD38:ERASE`.
 Note in actual fact that erasure may set bits to 1. For those devices, all
 communication will be inverted before sent. However, from the client's
 perspective all operations will be "normal."
+
+## Other Media
+SSD drives are essentially large SD cards with some extra features. Therefore,
+there should be essentially no conceptual changes (although obviously the
+physical layer would have some changes), except for possibly supporing multiple
+read/write heads, as some support 16 or more. For this, it would likely make
+sense to allow multiple sectors to be written (and GC'd) simultaniously.
+However, this would be a performance optimization and not a fundamental change.
+
+For Spinning Disk or Floppy, there are at least two major changes:
+- Everything is now byte mutable -- it is not required that you erase a whole
+  sector at once. Therefore GCRef can be replaced with simply Ref and Versioned
+  objects can be replaced with their basic form (i.e. VersionedLen -> Len).
+- There is a concept of "spindles", which is a single rotation at a specific
+  radius. Possibly replace the `Sector` objects with `Spindle` objects. More
+  investigation needed.
+- GC would only move data and mark the "spindle" as "deleted." It would not
+  actually "erase" the data, as there is no need.
+
+For spinning disk/floppy, this would remove any `v` (i.e. `O(log v)` ) from the
+time calculations, as well as saving some write time and reserved space.
+
+Another change that might make sense for spinning disk is to semi-frequently
+(weekly? monthly?) re-write the filesystem to keep related directories and file
+data close together, as seek performance is slower on spinning disk vs solid
+state drives. More investigation with real-world use is required.
 
 ## Bibliography
 
