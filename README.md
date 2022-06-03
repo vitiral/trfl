@@ -12,11 +12,11 @@ The filesystem is designed to wear-level for solid state drives (SD Cards, SSD
 drives, etc) but can also be used for [Other Media](#other-media) with only
 minor changes.
 
-> **Note:** The name is pronounced "truffle". The truffle is the structure of
-> mycorrhizal fungi which lives in a symbiotic relationship with the root
-> structure of plants. The name was chosen since filesystems are trees which
-> contain a root node, and this filesystem is intended to be used by the [fngi]
-> kernel.
+> **Note:** The name is pronounced "truffle". The truffle is the reproductive
+> structure of a mycorrhizal fungi which lives in a symbiotic relationship with
+> the root structure of plants. The name was chosen since filesystems are trees
+> which contain a root node, and this filesystem is intended to be used by the
+> [fngi] kernel.
 
 ## Basics
 
