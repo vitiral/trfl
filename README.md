@@ -1,17 +1,22 @@
-# fngi filesystem
+# trfl FS: a filesystem for fngi
 
-This is an in-development (currently conceptual) filesystem for the
-[fngi](http://github.com/civboot/fngi) kernel, intended to be used
-for a bootloader or on a microcontroller/etc, but robust enough as a general
-purpose file system.
+This is an in-development (**WARNING: currently conceptual**) filesystem for the
+[fngi] kernel, intended to be used on a microcontroller or simple operating
+system for [Civboot], but robust enough as a general purpose file system.
 
-This is an extremely simple embedded filesystem with low memory requirements. It
-stores a Binary Search Tree of directories, files and their data with the
-ability to create, delete, write, append, read and modify.
+Trfl stores a Binary Search Tree of directories, files and a rope structure of
+their data with the ability to efficiently create, delete, write, append, read
+and modify in `O(log N)` time.
 
 The filesystem is designed to wear-level for solid state drives (SD Cards, SSD
 drives, etc) but can also be used for [Other Media](#other-media) with only
 minor changes.
+
+> **Note:** The name is pronounced "truffle". The truffle is the structure of
+> mycorrhizal fungi which lives in a symbiotic relationship with the root
+> structure of plants. The name was chosen since filesystems are trees which
+> contain a root node, and this filesystem is intended to be used by the [fngi]
+> kernel.
 
 ## Basics
 
@@ -507,6 +512,8 @@ Poly     | 1^0 + 0^1 + 0^2 + x^3 + 0^4 + x^5 + 0^6 + 0^7 + x^8 | x^8 + x^5 + x^3
 Binary   | 1     0     0     1     0     1     0     0     1   | 0x94
 ```
 
+[fngi]: http://github.com/civboot/fngi
+[Civboot]: http://civboot.org
 [Erasure Block]: https://en.wikipedia.org/wiki/Flash_memory#NAND_memories
 [Physical Layer Spec]: https://www.sdcard.org/downloads/pls/
 
